@@ -1,9 +1,22 @@
 import requests
 import time
 import os
+import socket
 import config
+from datetime import datetime
 
 ultimo_update_id = None
+ultima_alerta_cpu = 0
+ultima_alerta_ram = 0
+ultima_alerta_temp = 0
+ultima_alerta_disco = 0
+ultima_alerta_conexion = 0
+conexion_perdida = False
+dispositivos_conocidos = set()
+informe_enviado_hoy = False
+ultimo_dia_informe = -1
+
+# ─── MÉTRICAS ───────────────────────────────────────────
 
 def get_cpu():
     f = open("/proc/stat", "r")
@@ -41,11 +54,11 @@ def get_temperatura():
 
 def get_disco():
     info = os.statvfs("/")
-    total = info.f_blocks * info.f_frsize
-    libre = info.f_bfree * info.f_frsize
-    usado = total - libre
-    porcentaje = round(100 * usado / total, 1)
-    return porcentaje
+    total_gb = round((info.f_blocks * info.f_frsize) / 1073741824, 1)
+    libre_gb = round((info.f_bfree * info.f_frsize) / 1073741824, 1)
+    usado_gb = round(total_gb - libre_gb, 1)
+    porcentaje = round(100 * usado_gb / total_gb, 1)
+    return usado_gb, libre_gb, total_gb, porcentaje
 
 def get_uptime():
     f = open("/proc/uptime", "r")
@@ -57,7 +70,6 @@ def get_uptime():
     return str(dias) + "d " + str(horas) + "h " + str(minutos) + "m"
 
 def get_ip_local():
-    import socket
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
     ip = s.getsockname()[0]
@@ -65,8 +77,6 @@ def get_ip_local():
     return ip
 
 def get_procesos():
-    f = open("/proc/stat", "r")
-    f.close()
     resultado = os.popen("ps aux --sort=-%cpu | head -6").read()
     lineas = resultado.strip().split("\n")
     texto = ""
@@ -87,14 +97,92 @@ def get_pihole():
     bloqueados = datos["queries"]["blocked"]
     total = datos["queries"]["total"]
     porcentaje = round(100 * bloqueados / total, 1)
-    return str(bloqueados) + " bloqueados de " + str(total) + " consultas (" + str(porcentaje) + "%)"
+    return str(bloqueados) + " bloqueados de " + str(total) + " (" + str(porcentaje) + "%)"
+
+def get_docker():
+    resultado = os.popen("docker ps --format '{{.Names}} {{.Status}}'").read()
+    if resultado.strip() == "":
+        return "No hay contenedores corriendo"
+    return resultado.strip()
+
+def hay_conexion():
+    try:
+        requests.get("https://8.8.8.8", timeout=3)
+        return True
+    except:
+        return False
+
+# ─── TIEMPO ─────────────────────────────────────────────
+
+def codigo_a_emoji(codigo):
+    if codigo == 0:
+        return "☀️ Despejado"
+    elif codigo <= 3:
+        return "⛅ Nublado"
+    elif codigo <= 48:
+        return "🌫️ Niebla"
+    elif codigo <= 55:
+        return "🌦️ Llovizna"
+    elif codigo <= 65:
+        return "🌧️ Lluvia"
+    elif codigo <= 75:
+        return "❄️ Nieve"
+    elif codigo <= 82:
+        return "🌧️ Chubascos"
+    elif codigo <= 99:
+        return "⛈️ Tormenta"
+    return "❓"
+
+def get_tiempo():
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        "?latitude=39.5696&longitude=2.6502"
+        "&hourly=temperature_2m,precipitation_probability,windspeed_10m,weathercode"
+        "&timezone=Europe%2FMadrid&forecast_days=2"
+    )
+    respuesta = requests.get(url)
+    datos = respuesta.json()
+    horas = datos["hourly"]["time"]
+    temperaturas = datos["hourly"]["temperature_2m"]
+    precipitacion = datos["hourly"]["precipitation_probability"]
+    viento = datos["hourly"]["windspeed_10m"]
+    codigos = datos["hourly"]["weathercode"]
+
+    manana = (datetime.now().date().__str__()[:-2])
+    dia_manana = str(datetime.now().day + 1).zfill(2)
+    manana = datetime.now().strftime("%Y-%m-") + dia_manana
+
+    texto = "🌤️ Tiempo mañana en Palma (10h-18h):\n\n"
+    for i in range(len(horas)):
+        if horas[i].startswith(manana):
+            hora = horas[i][11:16]
+            h = int(hora[:2])
+            if 10 <= h <= 18:
+                estado = codigo_a_emoji(codigos[i])
+                texto = texto + hora + "h " + estado + "\n"
+                texto = texto + "🌡️ " + str(temperaturas[i]) + "°C  "
+                texto = texto + "💧 " + str(precipitacion[i]) + "%  "
+                texto = texto + "💨 " + str(viento[i]) + " km/h\n\n"
+    return texto
+
+# ─── RED ────────────────────────────────────────────────
+
+def get_dispositivos():
+    resultado = os.popen("arp -a").read()
+    dispositivos = set()
+    for linea in resultado.strip().split("\n"):
+        partes = linea.split()
+        if len(partes) >= 4:
+            ip = partes[1].replace("(", "").replace(")", "")
+            mac = partes[3]
+            dispositivos.add(ip + " " + mac)
+    return dispositivos
+
+# ─── TELEGRAM ───────────────────────────────────────────
 
 def mandar_mensaje(texto):
     url = "https://api.telegram.org/bot" + config.TOKEN + "/sendMessage"
-    datos = {
-        "chat_id": config.CHAT_ID,
-        "text": texto
-    }
+    datos = {"chat_id": config.CHAT_ID, "text": texto}
     requests.post(url, data=datos)
 
 def inicializar_updates():
@@ -123,68 +211,139 @@ def procesar_comandos():
             continue
         texto = mensaje["message"].get("text", "")
         print("Comando recibido: " + texto)
+
         if texto == "/estado":
             cpu = calcular_cpu_porcentaje()
             ram = get_ram()
             temp = get_temperatura()
-            disco = get_disco()
+            usado_gb, libre_gb, total_gb, porcentaje_disco = get_disco()
             uptime = get_uptime()
-            respuesta = (
+            mandar_mensaje(
                 "🍓 Estado del Pi:\n"
                 "CPU: " + str(cpu) + "%\n"
                 "RAM: " + str(ram) + "%\n"
                 "Temp: " + str(temp) + "°C\n"
-                "Disco: " + str(disco) + "%\n"
-                "Uptime: " + uptime + "\n"
+                "Disco: " + str(usado_gb) + "GB / " + str(total_gb) + "GB (" + str(porcentaje_disco) + "%)\n"
+                "Libre: " + str(libre_gb) + "GB\n"
+                "Uptime: " + uptime
             )
-            mandar_mensaje(respuesta)
-        elif texto == "/reiniciar":
-            mandar_mensaje("🔄 Reiniciando el Pi...")
-            os.system("sudo reboot")
+
+        elif texto == "/disco":
+            usado_gb, libre_gb, total_gb, porcentaje_disco = get_disco()
+            mandar_mensaje(
+                "💾 Disco:\n"
+                "Usado: " + str(usado_gb) + " GB\n"
+                "Libre: " + str(libre_gb) + " GB\n"
+                "Total: " + str(total_gb) + " GB\n"
+                "Ocupación: " + str(porcentaje_disco) + "%"
+            )
 
         elif texto == "/ip":
             ip = get_ip_local()
             mandar_mensaje("🌐 IP local: " + ip + "\n🔒 Tailscale: 100.125.239.75")
 
         elif texto == "/procesos":
-            procesos = get_procesos()
-            mandar_mensaje("⚙️ Top procesos:\n" + procesos)
+            mandar_mensaje("⚙️ Top procesos:\n" + get_procesos())
 
         elif texto == "/pihole":
-            stats = get_pihole()
-            mandar_mensaje("🛡️ Pi-hole hoy: " + stats)
+            mandar_mensaje("🛡️ Pi-hole hoy: " + get_pihole())
+
+        elif texto == "/docker":
+            mandar_mensaje("🐳 Contenedores Docker:\n" + get_docker())
+
+        elif texto == "/tiempo":
+            mandar_mensaje(get_tiempo())
+
+        elif texto == "/reiniciar":
+            mandar_mensaje("🔄 Reiniciando el Pi...")
+            os.system("sudo reboot")
 
         elif texto == "/ayuda":
             mandar_mensaje(
                 "🍓 Comandos disponibles:\n\n"
-                "/estado → CPU, RAM, temperatura, disco y uptime\n"
+                "/estado → resumen completo\n"
+                "/disco → espacio en GB\n"
                 "/ip → IP local y Tailscale\n"
-                "/procesos → top 5 procesos por CPU\n"
-                "/pihole → estadísticas de Pi-hole\n"
+                "/procesos → top 5 por CPU\n"
+                "/pihole → estadísticas Pi-hole\n"
+                "/docker → contenedores activos\n"
+                "/tiempo → previsión mañana 10h-18h\n"
                 "/reiniciar → reinicia el Pi\n"
-                "/ayuda → muestra este mensaje"
+                "/ayuda → este mensaje"
             )
+
+# ─── INICIO ─────────────────────────────────────────────
+
+inicializar_updates()
+dispositivos_conocidos = get_dispositivos()
+mandar_mensaje("🍓 Bot iniciado y escuchando...")
 
 contador = 0
 
 while True:
     procesar_comandos()
+    ahora = time.time()
+    hora_actual = datetime.now().hour
+    dia_actual = datetime.now().day
+
+    # Informe diario a las 8h
+    if hora_actual == 8 and dia_actual != ultimo_dia_informe:
+        ultimo_dia_informe = dia_actual
+        cpu = calcular_cpu_porcentaje()
+        ram = get_ram()
+        temp = get_temperatura()
+        usado_gb, libre_gb, total_gb, porcentaje_disco = get_disco()
+        uptime = get_uptime()
+        mandar_mensaje(
+            "📊 Informe diario:\n"
+            "CPU: " + str(cpu) + "%\n"
+            "RAM: " + str(ram) + "%\n"
+            "Temp: " + str(temp) + "°C\n"
+            "Disco: " + str(usado_gb) + "GB / " + str(total_gb) + "GB\n"
+            "Uptime: " + uptime
+        )
 
     contador = contador + 1
     if contador >= 6:
         contador = 0
+
+        # Conexión
+        if not hay_conexion():
+            if not conexion_perdida:
+                conexion_perdida = True
+                mandar_mensaje("🔴 El Pi ha perdido la conexión a internet")
+        else:
+            if conexion_perdida:
+                conexion_perdida = False
+                mandar_mensaje("🟢 El Pi ha recuperado la conexión a internet")
+
         cpu = calcular_cpu_porcentaje()
         ram = get_ram()
         temp = get_temperatura()
-        disco = get_disco()
+        usado_gb, libre_gb, total_gb, porcentaje_disco = get_disco()
 
-        if cpu > 80:
+        # Anti-spam: solo alerta si han pasado 10 minutos desde la última
+        if cpu > 80 and (ahora - ultima_alerta_cpu) > 600:
+            ultima_alerta_cpu = ahora
             mandar_mensaje("⚠️ CPU alta: " + str(cpu) + "%")
-        if ram > 80:
+
+        if ram > 80 and (ahora - ultima_alerta_ram) > 600:
+            ultima_alerta_ram = ahora
             mandar_mensaje("⚠️ RAM alta: " + str(ram) + "%")
-        if temp > 70:
+
+        if temp > 70 and (ahora - ultima_alerta_temp) > 600:
+            ultima_alerta_temp = ahora
             mandar_mensaje("🌡️ Temperatura alta: " + str(temp) + "°C")
-        if disco > 80:
-            mandar_mensaje("💾 Disco casi lleno: " + str(disco) + "%")
+
+        if porcentaje_disco > 80 and (ahora - ultima_alerta_disco) > 600:
+            ultima_alerta_disco = ahora
+            mandar_mensaje("💾 Disco casi lleno: " + str(porcentaje_disco) + "%")
+
+        # Monitor de red
+        dispositivos_actuales = get_dispositivos()
+        nuevos = dispositivos_actuales - dispositivos_conocidos
+        for dispositivo in nuevos:
+            mandar_mensaje("📡 Nuevo dispositivo en la red: " + dispositivo)
+        dispositivos_conocidos = dispositivos_actuales
 
     time.sleep(10)
