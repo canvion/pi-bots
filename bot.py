@@ -44,11 +44,37 @@ def mandar_mensaje(texto):
     }
     requests.post(url, data=datos)
 
+def get_disco():
+    f = open("/proc/mounts", "r")
+    lineas = f.readlines()
+    f.close()
+    import os
+    info = os.statvfs("/")
+    total = info.f_blocks * info.f_frsize
+    libre = info.f_bfree * info.f_frsize
+    usado = total - libre
+    porcentaje = round(100 * usado / total, 1)
+    return porcentaje
+
+def get_uptime():
+    f = open("/proc/uptime", "r")
+    segundos = float(f.read().split()[0])
+    f.close()
+    dias = int(segundos // 86400)
+    horas = int((segundos % 86400) // 3600)
+    minutos = int((segundos % 3600) // 60)
+    return str(dias) + "d " + str(horas) + "h " + str(minutos) + "m"
+
+def get_ip_publica():
+    respuesta = requests.get("https://api.ipify.org")
+    return respuesta.text
+
 while True:
     cpu = calcular_cpu_porcentaje()
     ram = get_ram()
     temp = get_temperatura()
-
+    disco = get_disco()
+    
     if cpu > 70:
         mandar_mensaje("⚠️ CPU alta: " + str(cpu) + "%")
 
@@ -57,5 +83,8 @@ while True:
 
     if temp > 60:
         mandar_mensaje("🌡️ Temperatura alta: " + str(temp) + "°C")
+
+    if disco > 80:
+        mandar_mensaje("💾 Disco casi lleno: " + str(disco) + "%")
 
     time.sleep(60)
