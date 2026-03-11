@@ -4,26 +4,38 @@ Bot de Telegram para monitorizar el estado de una Raspberry Pi en tiempo real. M
 
 ## ¿Qué hace?
 
-- Manda una alerta si la **CPU** supera el 80%
-- Manda una alerta si la **RAM** supera el 80%
-- Manda una alerta si la **temperatura** supera los 70°C
-- Manda una alerta si el **disco** supera el 80%
-- Responde al comando `/estado` con un resumen completo del Pi
-- Responde al comando `/reiniciar` para reiniciar el Pi remotamente
+**Alertas automáticas** (anti-spam: máximo 1 alerta cada 10 minutos):
+- ⚠️ CPU superior al 80%
+- ⚠️ RAM superior al 80%
+- 🌡️ Temperatura superior a 70°C
+- 💾 Disco superior al 80%
+- 🔴 Pérdida de conexión a internet
+- 🟢 Recuperación de conexión a internet
+- 📡 Nuevo dispositivo conectado a la red
+- 🍓 Aviso cuando el Pi arranca
+
+**Informe diario automático** a las 8h con CPU, RAM, temperatura, disco y uptime.
 
 ## Comandos disponibles
 
 | Comando | Descripción |
 |---|---|
-| `/estado` | Muestra CPU, RAM, temperatura, disco y uptime |
-| `/reiniciar` | Reinicia el Pi |
+| `/estado` | CPU, RAM, temperatura, disco y uptime |
+| `/disco` | Espacio usado, libre y total en GB |
+| `/ip` | IP local y IP de Tailscale |
+| `/procesos` | Top 5 procesos que más CPU consumen |
+| `/pihole` | Dominios bloqueados hoy y porcentaje |
+| `/docker` | Contenedores Docker activos |
+| `/tiempo` | Previsión meteorológica de mañana (10h-18h) |
+| `/reiniciar` | Reinicia el Pi remotamente |
+| `/ayuda` | Lista todos los comandos |
 
 ## Instalación
 
 **1. Clona el repositorio:**
 ```bash
-git clone https://github.com/tu-usuario/telegram-bot.git
-cd telegram-bot
+git clone https://github.com/tu-usuario/telegrambot-RaspberryPi.git
+cd telegrambot-RaspberryPi
 ```
 
 **2. Crea tu archivo de configuración:**
@@ -32,10 +44,11 @@ cp config.example.py config.py
 nano config.py
 ```
 
-Rellena tu Token de Telegram y tu Chat ID:
+Rellena tus datos:
 ```python
 TOKEN = "tu-token-de-botfather"
 CHAT_ID = "tu-chat-id"
+PIHOLE_PASSWORD = "tu-password-de-pihole"
 ```
 
 **3. Ejecuta el bot:**
@@ -58,8 +71,8 @@ After=network.target
 
 [Service]
 User=tu-usuario
-WorkingDirectory=/home/tu-usuario/telegram-bot
-ExecStart=/usr/bin/python3 /home/tu-usuario/telegram-bot/bot.py
+WorkingDirectory=/home/tu-usuario/telegrambot-RaspberryPi
+ExecStart=/usr/bin/python3 /home/tu-usuario/telegrambot-RaspberryPi/bot.py
 Restart=always
 
 [Install]
@@ -85,4 +98,6 @@ sudo systemctl start telegrambot
 - Raspberry Pi con Raspberry Pi OS
 - Python 3
 - Librería `requests` (`pip3 install requests --break-system-packages`)
+- Pi-hole instalado (para el comando `/pihole`)
+- Docker instalado (para el comando `/docker`)
 - Conexión a internet
