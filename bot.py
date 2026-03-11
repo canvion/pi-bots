@@ -1,6 +1,9 @@
 import requests
 import time
+import os
 import config
+
+ultimo_update_id = None
 
 def get_cpu():
     f = open("/proc/stat", "r")
@@ -36,19 +39,7 @@ def get_temperatura():
     f.close()
     return round(int(temp) / 1000, 1)
 
-def mandar_mensaje(texto):
-    url = "https://api.telegram.org/bot" + config.TOKEN + "/sendMessage"
-    datos = {
-        "chat_id": config.CHAT_ID,
-        "text": texto
-    }
-    requests.post(url, data=datos)
-
 def get_disco():
-    f = open("/proc/mounts", "r")
-    lineas = f.readlines()
-    f.close()
-    import os
     info = os.statvfs("/")
     total = info.f_blocks * info.f_frsize
     libre = info.f_bfree * info.f_frsize
@@ -65,26 +56,79 @@ def get_uptime():
     minutos = int((segundos % 3600) // 60)
     return str(dias) + "d " + str(horas) + "h " + str(minutos) + "m"
 
-def get_ip_publica():
-    respuesta = requests.get("https://api.ipify.org")
-    return respuesta.text
+def mandar_mensaje(texto):
+    url = "https://api.telegram.org/bot" + config.TOKEN + "/sendMessage"
+    datos = {
+        "chat_id": config.CHAT_ID,
+        "text": texto
+    }
+    requests.post(url, data=datos)
+
+def inicializar_updates():
+    global ultimo_update_id
+    url = "https://api.telegram.org/bot" + config.TOKEN + "/getUpdates"
+    respuesta = requests.get(url)
+    datos = respuesta.json()
+    if len(datos["result"]) > 0:
+        ultimo_update_id = datos["result"][-1]["update_id"]
+
+def get_mensajes():
+    global ultimo_update_id
+    url = "https://api.telegram.org/bot" + config.TOKEN + "/getUpdates"
+    if ultimo_update_id is not None:
+        url = url + "?offset=" + str(ultimo_update_id + 1)
+    respuesta = requests.get(url)
+    datos = respuesta.json()
+    return datos["result"]
+
+def procesar_comandos():
+    global ultimo_update_id
+    mensajes = get_mensajes()
+    for mensaje in mensajes:
+        ultimo_update_id = mensaje["update_id"]
+        if "message" not in mensaje:
+            continue
+        texto = mensaje["message"].get("text", "")
+        print("Comando recibido: " + texto)
+        if texto == "/estado":
+            cpu = calcular_cpu_porcentaje()
+            ram = get_ram()
+            temp = get_temperatura()
+            disco = get_disco()
+            uptime = get_uptime()
+            respuesta = (
+                "🍓 Estado del Pi:\n"
+                "CPU: " + str(cpu) + "%\n"
+                "RAM: " + str(ram) + "%\n"
+                "Temp: " + str(temp) + "°C\n"
+                "Disco: " + str(disco) + "%\n"
+                "Uptime: " + uptime + "\n"
+            )
+            mandar_mensaje(respuesta)
+        elif texto == "/reiniciar":
+            mandar_mensaje("🔄 Reiniciando el Pi...")
+            os.system("sudo reboot")
+
+contador = 0
 
 while True:
-    cpu = calcular_cpu_porcentaje()
-    ram = get_ram()
-    temp = get_temperatura()
-    disco = get_disco()
-    
-    if cpu > 70:
-        mandar_mensaje("⚠️ CPU alta: " + str(cpu) + "%")
+    procesar_comandos()
 
-    if ram > 70:
-        mandar_mensaje("⚠️ RAM alta: " + str(ram) + "%")
+    contador = contador + 1
+    if contador >= 6:
+        contador = 0
+        cpu = calcular_cpu_porcentaje()
+        ram = get_ram()
+        temp = get_temperatura()
+        disco = get_disco()
 
-    if temp > 60:
-        mandar_mensaje("🌡️ Temperatura alta: " + str(temp) + "°C")
+        if cpu > 80:
+            mandar_mensaje("⚠️ CPU alta: " + str(cpu) + "%")
+        if ram > 80:
+            mandar_mensaje("⚠️ RAM alta: " + str(ram) + "%")
+        if temp > 70:
+            mandar_mensaje("🌡️ Temperatura alta: " + str(temp) + "°C")
+        if disco > 80:
+            mandar_mensaje("💾 Disco casi lleno: " + str(disco) + "%")
 
-    if disco > 80:
-        mandar_mensaje("💾 Disco casi lleno: " + str(disco) + "%")
-
-    time.sleep(60)
+    time.sleep(10)
