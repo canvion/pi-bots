@@ -100,10 +100,23 @@ def get_pihole():
     return str(bloqueados) + " bloqueados de " + str(total) + " (" + str(porcentaje) + "%)"
 
 def get_docker():
-    resultado = os.popen("docker ps --format '{{.Names}} {{.Status}}'").read()
+    resultado = os.popen("docker ps --format '{{.Names}}|{{.Status}}|{{.Image}}'").read()
     if resultado.strip() == "":
         return "No hay contenedores corriendo"
-    return resultado.strip()
+    texto = ""
+    for linea in resultado.strip().split("\n"):
+        partes = linea.split("|")
+        nombre = partes[0]
+        estado = partes[1]
+        imagen = partes[2]
+        if "Up" in estado:
+            emoji = "🟢"
+        else:
+            emoji = "🔴"
+        texto = texto + emoji + " " + nombre + "\n"
+        texto = texto + "   📦 " + imagen + "\n"
+        texto = texto + "   ⏱️ " + estado + "\n\n"
+    return texto.strip()
 
 def hay_conexion():
     try:
@@ -152,7 +165,12 @@ def get_tiempo():
     dia_manana = str(datetime.now().day + 1).zfill(2)
     manana = datetime.now().strftime("%Y-%m-") + dia_manana
 
-    texto = "🌤️ Tiempo mañana en Palma (10h-18h):\n\n"
+    dias_semana = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+    dia_nombre = dias_semana[(datetime.now().weekday() + 1) % 7]
+    dia_num = datetime.now().day + 1
+    mes_nombre = meses[datetime.now().month - 1]
+    texto = "🌤️ Tiempo mañana, " + dia_nombre + " " + str(dia_num) + " de " + mes_nombre + " en Palma (10h-18h):\n\n"
     for i in range(len(horas)):
         if horas[i].startswith(manana):
             hora = horas[i][11:16]
