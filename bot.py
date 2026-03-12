@@ -196,6 +196,21 @@ def get_dispositivos():
             dispositivos.add(ip + " " + mac)
     return dispositivos
 
+def cargar_dispositivos():
+    if os.path.exists("dispositivos.json"):
+        f = open("dispositivos.json", "r")
+        import json
+        datos = json.load(f)
+        f.close()
+        return set(datos)
+    return set()
+
+def guardar_dispositivos(dispositivos):
+    import json
+    f = open("dispositivos.json", "w")
+    json.dump(list(dispositivos), f)
+    f.close()
+
 # ─── TELEGRAM ───────────────────────────────────────────
 
 def mandar_mensaje(texto):
@@ -293,7 +308,10 @@ def procesar_comandos():
 # ─── INICIO ─────────────────────────────────────────────
 
 inicializar_updates()
-dispositivos_conocidos = get_dispositivos()
+dispositivos_conocidos = cargar_dispositivos()
+if len(dispositivos_conocidos) == 0:
+    dispositivos_conocidos = get_dispositivos()
+    guardar_dispositivos(dispositivos_conocidos)
 mandar_mensaje("🍓 Bot iniciado y escuchando...")
 
 contador = 0
@@ -362,6 +380,8 @@ while True:
         nuevos = dispositivos_actuales - dispositivos_conocidos
         for dispositivo in nuevos:
             mandar_mensaje("📡 Nuevo dispositivo en la red: " + dispositivo)
-        dispositivos_conocidos = dispositivos_actuales
+        if len(nuevos) > 0:
+            dispositivos_conocidos = dispositivos_actuales
+            guardar_dispositivos(dispositivos_conocidos)
 
     time.sleep(10)
