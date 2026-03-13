@@ -8,8 +8,6 @@ from datetime import datetime, timedelta
 
 ultimo_update_id = None
 
-# ─── RECORDATORIOS ──────────────────────────────────────
-
 def cargar_recordatorios():
     if os.path.exists("recordatorios.json"):
         f = open("recordatorios.json", "r")
@@ -29,7 +27,6 @@ def añadir_recordatorio(hora, texto):
     guardar_recordatorios(recordatorios)
 
 def parsear_mensaje(mensaje):
-    # Formato: "a las 18h" o "a las 18:06"
     patron_hora = re.search(r"a las (\d+)(?::(\d+))?h?", mensaje)
     if patron_hora:
         hora = patron_hora.group(1).zfill(2)
@@ -39,7 +36,6 @@ def parsear_mensaje(mensaje):
         texto = re.sub(r"recuérdame|recuerda|que|me", "", texto).strip()
         return hora_completa, texto
 
-    # Formato: "en 30 minutos"
     patron_minutos = re.search(r"en (\d+) minutos", mensaje)
     if patron_minutos:
         minutos = int(patron_minutos.group(1))
@@ -70,8 +66,6 @@ def comprobar_recordatorios():
         guardar_recordatorios(pendientes)
 
     return disparados
-
-# ─── TELEGRAM ───────────────────────────────────────────
 
 def mandar_mensaje(texto):
     url = "https://api.telegram.org/bot" + config.TOKEN + "/sendMessage"
@@ -117,7 +111,10 @@ def procesar_comandos():
 
         elif texto.startswith("/borrar"):
             partes = texto.split()
-            if len(partes) == 2:
+            if len(partes) == 2 and partes[1] == "todo":
+                guardar_recordatorios([])
+                mandar_mensaje("🗑️ Todos los recordatorios borrados")
+            elif len(partes) == 2:
                 numero = int(partes[1]) - 1
                 recordatorios = cargar_recordatorios()
                 if 0 <= numero < len(recordatorios):
@@ -126,6 +123,8 @@ def procesar_comandos():
                     mandar_mensaje("🗑️ Borrado: " + borrado["texto"])
                 else:
                     mandar_mensaje("❌ Número inválido")
+            else:
+                mandar_mensaje("❌ Uso: /borrar 1 o /borrar todo")
 
         elif texto == "/ayuda":
             mandar_mensaje(
@@ -135,6 +134,7 @@ def procesar_comandos():
                 "→ en 30 minutos recuérdame llamar al médico\n\n"
                 "/recordatorios → ver todos los pendientes\n"
                 "/borrar 1 → borrar el recordatorio número 1\n"
+                "/borrar todo → borrar todos los recordatorios\n"
                 "/ayuda → este mensaje"
             )
 
@@ -146,16 +146,12 @@ def procesar_comandos():
             else:
                 mandar_mensaje("❓ No te entendí. Escribe /ayuda para ver cómo usarme")
 
-# ─── INICIO ─────────────────────────────────────────────
-
 inicializar_updates()
 mandar_mensaje("⏰ Bot de recordatorios iniciado...")
 
 while True:
     procesar_comandos()
-
     disparados = comprobar_recordatorios()
     for r in disparados:
         mandar_mensaje("⏰ Recuerda: " + r["texto"])
-
     time.sleep(30)
